@@ -1,5 +1,6 @@
 const { Storage } = require('@google-cloud/storage');
 const path = require('path');
+require('dotenv').config();
 
 // Create storage instance
 const storage = new Storage({
@@ -72,6 +73,7 @@ const generateSignedUrl = async (filePath) => {
 
 // List files in a directory
 const listFiles = async (prefix) => {
+  console.log("......................here is the prefix",prefix)
   try {
     const options = {
       prefix,
@@ -79,6 +81,7 @@ const listFiles = async (prefix) => {
     
     // Lists files in the bucket with the given prefix
     const [files] = await bucket.getFiles(options);
+    console.log("......................here is the files", files)
     
     return files.map(file => ({
       name: file.name,
