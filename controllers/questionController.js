@@ -1,15 +1,36 @@
 const Question = require('../models/Question');
+const { getSignedUrl } = require('../utils/storageService');
 
 // Get all questions
 exports.getQuestions = async (req, res) => {
   try {
     const questions = await Question.find().sort({ questionNumber: 1 });
-    res.json(questions);
+    
+    // For each question, check if the audio URL needs to be refreshed
+    const refreshedQuestions = await Promise.all(questions.map(async (question) => {
+      const questionObj = question.toObject();
+      
+      // If the URL is a signed URL from GCS, it might be expired
+      // We can check based on whether we have a storage path
+      if (question.audioPromptStoragePath) {
+        // Generate a fresh signed URL
+        const freshUrl = await getSignedUrl(question.audioPromptStoragePath);
+        questionObj.audioPromptUrl = freshUrl;
+        
+        // Optionally update the document in the database with the new URL
+        await Question.findByIdAndUpdate(question._id, { audioPromptUrl: freshUrl });
+      }
+      
+      return questionObj;
+    }));
+    
+    res.json(refreshedQuestions);
   } catch (error) {
     console.error('Error fetching questions:', error);
     res.status(500).json({ message: 'Server error' });
   }
 };
+
 
 // Get single question
 exports.getQuestion = async (req, res) => {

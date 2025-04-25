@@ -5,7 +5,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "seed": "node scripts/seed.js"
+    "seed": "node scripts/seed.js",
+    "import-questions": "node scripts/import-questions-from-gcs.js"
   },
   "keywords": [],
   "author": "",

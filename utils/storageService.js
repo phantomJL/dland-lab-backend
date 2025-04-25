@@ -7,7 +7,10 @@ const storage = new Storage({
   keyFilename: process.env.GOOGLE_APPLICATION_CREDENTIALS
 });
 
+console.log(process.env.GOOGLE_APPLICATION_CREDENTIALS)
+
 const bucketName = process.env.GOOGLE_CLOUD_BUCKET;
+console.log('Bucket name:', bucketName);
 const bucket = storage.bucket(bucketName);
 
 // Upload file to Google Cloud Storage
@@ -67,7 +70,47 @@ const generateSignedUrl = async (filePath) => {
   }
 };
 
+// List files in a directory
+const listFiles = async (prefix) => {
+  try {
+    const options = {
+      prefix,
+    };
+    
+    // Lists files in the bucket with the given prefix
+    const [files] = await bucket.getFiles(options);
+    
+    return files.map(file => ({
+      name: file.name,
+      path: file.name,
+      size: file.metadata.size
+    }));
+  } catch (err) {
+    console.error('Error listing files:', err);
+    throw new Error(`Could not list files: ${err.message}`);
+  }
+};
+
+// Get a signed URL for a file in your bucket
+const getSignedUrl = async (filePath) => {
+  try {
+    const file = bucket.file(filePath);
+    const [url] = await file.getSignedUrl({
+      action: 'read',
+      expires: Date.now() + 7 * 24 * 60 * 60 * 1000, // 1 week
+    });
+    
+    return url;
+  } catch (err) {
+    console.error('Error generating signed URL:', err);
+    throw new Error(`Could not generate signed URL: ${err.message}`);
+  }
+};
+
+// Export these functions
 module.exports = {
   uploadFile,
-  generateSignedUrl
+  generateSignedUrl,
+  listFiles,
+  getSignedUrl
 };
