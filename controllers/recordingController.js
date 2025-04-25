@@ -1,3 +1,4 @@
+// controllers/recordingController.js
 const Recording = require('../models/Recording');
 const Question = require('../models/Question');
 const Participant = require('../models/Participant');
@@ -45,20 +46,43 @@ exports.uploadRecording = async (req, res) => {
     await recording.save();
     
     // Update assessment status
-    let assessment = await Assessment.findOne({ participantId });
-    if (!assessment) {
-      assessment = new Assessment({
-        participantId,
-        status: 'in_progress',
-        startedAt: new Date(),
-        lastQuestionIndex: question.questionNumber - 1
-      });
-    } else {
-      assessment.status = 'in_progress';
-      assessment.lastQuestionIndex = Math.max(assessment.lastQuestionIndex, question.questionNumber - 1);
+    try {
+      let assessment = await Assessment.findOne({ participantId });
+      
+      // Determine the question index safely
+      let questionIndex = 0;
+      if (question.questionNumber !== undefined) {
+        questionIndex = question.questionNumber - 1;
+      } else if (question.sequenceId !== undefined) {
+        questionIndex = question.sequenceId - 1;
+      }
+      
+      // Ensure questionIndex is a valid number
+      if (isNaN(questionIndex) || questionIndex < 0) {
+        questionIndex = 0;
+      }
+      
+      if (!assessment) {
+        assessment = new Assessment({
+          participantId,
+          status: 'in_progress',
+          startedAt: new Date(),
+          lastQuestionIndex: questionIndex
+        });
+      } else {
+        assessment.status = 'in_progress';
+        // Only update lastQuestionIndex if the new index is greater than the current one
+        // and is a valid number
+        if (!isNaN(questionIndex) && (isNaN(assessment.lastQuestionIndex) || questionIndex > assessment.lastQuestionIndex)) {
+          assessment.lastQuestionIndex = questionIndex;
+        }
+      }
+      
+      await assessment.save();
+    } catch (assessmentError) {
+      console.error('Error updating assessment:', assessmentError);
+      // Continue with the response even if assessment update fails
     }
-    
-    await assessment.save();
     
     res.status(201).json({
       success: true,

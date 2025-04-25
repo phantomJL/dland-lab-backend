@@ -9,12 +9,16 @@ mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('MongoDB connected'))
   .catch(err => console.error('MongoDB connection error:', err));
 
-// Directory in your GCS bucket
-const PROMPTS_PREFIX = 'prompts/';
+// Base directory in your GCS bucket
+const BASE_PREFIX = 'prompts/';
+const ENGLISH_PREFIX = 'prompts/english_sentences/';
+const MANDARIN_PREFIX = 'prompts/mandarin_sentences/';
 
-// Function to import questions from GCS files
-async function importQuestionsFromGCS() {
+// Function to import questions from GCS files with language support
+async function importQuestionsFromGCS(language = 'english') {
   try {
+    console.log(`Starting import for ${language} questions...`);
+    
     // STEP 1: Drop all indices and recreate the collection
     console.log('Attempting to fix database structure...');
     
@@ -55,6 +59,7 @@ async function importQuestionsFromGCS() {
         instructions: String,
         category: String,
         requiresRecording: Boolean,
+        language: String, // Added language field
         createdAt: { type: Date, default: Date.now },
         updatedAt: { type: Date, default: Date.now }
       });
@@ -68,10 +73,15 @@ async function importQuestionsFromGCS() {
       console.log('Error recreating schema:', schemaError.message);
     }
 
-    // List all files in the prompts directory
-    const files = await listFiles(PROMPTS_PREFIX);
+    // Use the appropriate prefix based on language
+    const PREFIX = language === 'chinese' ? MANDARIN_PREFIX : ENGLISH_PREFIX;
     
-    console.log(`Found ${files.length} files in GCS bucket under ${PROMPTS_PREFIX}`);
+    console.log(`Listing files from: ${PREFIX}`);
+    
+    // List all files in the appropriate language directory
+    const files = await listFiles(PREFIX);
+    
+    console.log(`Found ${files.length} files in GCS bucket under ${PREFIX}`);
     
     // Filter for audio files
     const audioFiles = files.filter(file => 
@@ -95,16 +105,31 @@ async function importQuestionsFromGCS() {
       // Generate a signed URL for the file
       const audioUrl = await getSignedUrl(file.path);
       
+      // Create translations based on language
+      const instructionTexts = {
+        english: {
+          text: "Instructions",
+          instructions: "Please listen to these instructions carefully."
+        },
+        chinese: {
+          text: "指示",
+          instructions: "请仔细听这些指示。"
+        }
+      };
+      
+      const localizedText = instructionTexts[language] || instructionTexts.english;
+      
       questions.push({
         sequenceId: 1 + i,
         audioType: "instruction",
         displayNumber: 0, // Use 0 instead of null
-        text: "Instructions",
+        text: localizedText.text,
         audioPromptUrl: audioUrl,
         audioPromptStoragePath: file.path,
-        instructions: "Please listen to these instructions carefully.",
+        instructions: localizedText.instructions,
         category: "instruction",
-        requiresRecording: false
+        requiresRecording: false,
+        language: language
       });
       
       console.log(`Processed instruction file: ${file.name}`);
@@ -139,55 +164,79 @@ async function importQuestionsFromGCS() {
       // Generate a signed URL for the file
       const audioUrl = await getSignedUrl(file.path);
       
+      // Create translations based on language
+      const practiceTexts = {
+        english: {
+          text: `Practice ${practiceNumber}`,
+          instructions: "This is a practice question. Please respond to familiarize yourself with the recording system."
+        },
+        chinese: {
+          text: `练习 ${practiceNumber}`,
+          instructions: "这是一个练习问题。请回答以熟悉录音系统。"
+        }
+      };
+      
+      const localizedText = practiceTexts[language] || practiceTexts.english;
+      
       questions.push({
         sequenceId: instructionFiles.length + 1 + i,
         audioType: "practice",
         displayNumber: practiceNumber,
-        text: `Practice ${practiceNumber}`,
+        text: localizedText.text,
         audioPromptUrl: audioUrl,
         audioPromptStoragePath: file.path,
-        instructions: "This is a practice question. Please respond to familiarize yourself with the recording system.",
+        instructions: localizedText.instructions,
         category: "practice",
-        requiresRecording: true
+        requiresRecording: true,
+        language: language
       });
       
       console.log(`Processed practice question ${practiceNumber}: ${file.name}`);
     }
     
-    // Finally, process test questions - M_TS files, case insensitive matching
+    // Finally, process test questions - filter files that don't match instructions or practice
     const testFiles = audioFiles.filter(file => 
-      file.name.toLowerCase().includes('m_ts')
+      !file.name.toLowerCase().includes('instruction') && 
+      !file.name.toLowerCase().includes('practice')
     );
     
     console.log(`Found ${testFiles.length} test files`);
     
-    // Sort test files by number if possible
+    // Sort test files by number if possible (look for numbers in filenames)
     testFiles.sort((a, b) => {
-      const numA = parseInt((a.name.match(/m_ts\s*(\d+)/i) || [0, 0])[1], 10);
-      const numB = parseInt((b.name.match(/m_ts\s*(\d+)/i) || [0, 0])[1], 10);
-      return numA - numB;
+      // Try to extract any number from the filename
+      const numA = parseInt((a.name.match(/(\d+)/) || [0, 0])[1], 10);
+      const numB = parseInt((b.name.match(/(\d+)/) || [0, 0])[1], 10);
+      
+      if (numA && numB) {
+        return numA - numB;
+      }
+      
+      // If no numbers found, sort alphabetically
+      return a.name.localeCompare(b.name);
     });
+    
+    // Create translations based on language
+    const testTexts = {
+      english: {
+        textPrefix: "Question",
+        instructions: "Listen carefully and speak clearly into the microphone."
+      },
+      chinese: {
+        textPrefix: "问题",
+        instructions: "请仔细听并清晰地对着麦克风说话。"
+      }
+    };
+    
+    const localizedText = testTexts[language] || testTexts.english;
     
     for (let i = 0; i < testFiles.length; i++) {
       const file = testFiles[i];
-      // Extract question number from filename
       const filename = file.name.split('/').pop(); // Get just the filename without path
-      let questionNumber = null;
       
-      // Try to extract the number after "M_TS"
-      const match = filename.toLowerCase().match(/m_ts\s*(\d+)/i);
-      if (match) {
-        questionNumber = parseInt(match[1], 10);
-      } else {
-        // If no match, try to find any number in the filename
-        const numMatch = filename.match(/(\d+)/);
-        if (numMatch) {
-          questionNumber = parseInt(numMatch[1], 10);
-        } else {
-          // If still no match, use the index in the array + 1
-          questionNumber = i + 1;
-        }
-      }
+      // Try to extract a number from the filename
+      const match = filename.match(/(\d+)/);
+      let questionNumber = match ? parseInt(match[1], 10) : i + 1;
       
       // Generate a signed URL for the file
       const audioUrl = await getSignedUrl(file.path);
@@ -196,12 +245,13 @@ async function importQuestionsFromGCS() {
         sequenceId: instructionFiles.length + practiceFiles.length + 1 + i,
         audioType: "test",
         displayNumber: questionNumber,
-        text: `Question ${questionNumber}`,
+        text: `${localizedText.textPrefix} ${questionNumber}`,
         audioPromptUrl: audioUrl,
         audioPromptStoragePath: file.path,
-        instructions: "Listen carefully and speak clearly into the microphone.",
+        instructions: localizedText.instructions,
         category: "test",
-        requiresRecording: true
+        requiresRecording: true,
+        language: language
       });
       
       console.log(`Processed test question ${questionNumber}: ${file.name}`);
@@ -211,14 +261,13 @@ async function importQuestionsFromGCS() {
     questions.sort((a, b) => a.sequenceId - b.sequenceId);
     
     // Report what we found
-    console.log("\nQuestion summary:");
+    console.log(`\nQuestion summary for ${language}:`);
     console.log(`- Instruction questions: ${questions.filter(q => q.category === 'instruction').length}`);
     console.log(`- Practice questions: ${questions.filter(q => q.category === 'practice').length}`);
     console.log(`- Test questions: ${questions.filter(q => q.category === 'test').length}`);
     console.log(`- Total questions: ${questions.length}`);
     
-    // Insert questions using a direct MongoDB insert instead of Mongoose
-    // This bypasses any schema validations or hooks
+    // Insert questions using a direct MongoDB insert
     if (questions.length > 0) {
       try {
         console.log('Inserting questions directly to MongoDB...');
@@ -246,8 +295,8 @@ async function importQuestionsFromGCS() {
       
       // Print out a summary of what was imported
       try {
-        const importedQuestions = await mongoose.connection.db.collection('questions').find().sort({ sequenceId: 1 }).toArray();
-        console.log("\nImported questions (in order):");
+        const importedQuestions = await mongoose.connection.db.collection('questions').find({language: language}).sort({ sequenceId: 1 }).toArray();
+        console.log(`\nImported ${language} questions (in order):`);
         
         importedQuestions.forEach(q => {
           console.log(`- [${q.category}] ${q.text} (sequence: ${q.sequenceId}, type: ${q.audioType}, number: ${q.displayNumber})`);
@@ -256,15 +305,47 @@ async function importQuestionsFromGCS() {
         console.error('Error retrieving imported questions:', findError.message);
       }
     } else {
-      console.log('No questions to import');
+      console.log(`No ${language} questions to import`);
     }
+    
+    return questions.length;
   } catch (error) {
     console.error('Error importing questions:', error);
-  } finally {
-    mongoose.connection.close();
+    return 0;
   }
 }
 
-// Run the import
+// Helper function to determine if a file path belongs to a specific language
+function getLanguageFromPath(path) {
+  if (path.includes('mandarin_sentences') || path.includes('chinese')) {
+    return 'chinese';
+  }
+  return 'english';
+}
 
-importQuestionsFromGCS();
+// Main function to import all languages
+async function importAllLanguages() {
+  try {
+    // Import English questions
+    console.log('\n========== IMPORTING ENGLISH QUESTIONS ==========\n');
+    const englishCount = await importQuestionsFromGCS('english');
+    
+    // Import Chinese questions
+    console.log('\n========== IMPORTING CHINESE QUESTIONS ==========\n');
+    const chineseCount = await importQuestionsFromGCS('chinese');
+    
+    console.log('\n========== IMPORT SUMMARY ==========');
+    console.log(`Total English questions imported: ${englishCount}`);
+    console.log(`Total Chinese questions imported: ${chineseCount}`);
+    console.log(`Total questions imported: ${englishCount + chineseCount}`);
+    
+  } catch (error) {
+    console.error('Error importing questions for all languages:', error);
+  } finally {
+    mongoose.connection.close();
+    console.log('MongoDB connection closed');
+  }
+}
+
+// Run the import for all languages
+importAllLanguages();
