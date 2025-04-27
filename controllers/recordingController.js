@@ -1,18 +1,11 @@
-// controllers/recordingController.js
-const Recording = require('../models/Recording');
-const Question = require('../models/Question');
-const Participant = require('../models/Participant');
-const Assessment = require('../models/Assessment');
-const { uploadFile } = require('../utils/storageService');
-
-// Upload recording
+// controllers/recordingController.js - Updated uploadRecording function
 exports.uploadRecording = async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ message: 'No audio file provided' });
     }
     
-    const { participantId, questionId, duration } = req.body;
+    const { participantId, questionId, duration, language, testIndex } = req.body;
     
     // Validate question exists
     const question = await Question.findById(questionId);
@@ -27,9 +20,11 @@ exports.uploadRecording = async (req, res) => {
       await participant.save();
     }
     
-    // Create a unique filename with timestamp
+    // Create a unique filename with timestamp and language
     const timestamp = Date.now();
-    const filename = `recordings/${participantId}/${questionId}_${timestamp}.wav`;
+    const languageCode = language || 'en';
+    const testIdx = testIndex || 0;
+    const filename = `recordings/${participantId}/${languageCode}_${testIdx}_${questionId}_${timestamp}.wav`;
     
     // Upload to cloud storage
     const fileData = await uploadFile(req.file, filename);
@@ -38,6 +33,8 @@ exports.uploadRecording = async (req, res) => {
     const recording = new Recording({
       participantId,
       questionId,
+      language: language || 'english',
+      testIndex: testIndex || 0,
       audioUrl: fileData.url,
       audioStoragePath: fileData.path,
       durationMs: duration || 0
@@ -47,7 +44,11 @@ exports.uploadRecording = async (req, res) => {
     
     // Update assessment status
     try {
-      let assessment = await Assessment.findOne({ participantId });
+      let assessment = await Assessment.findOne({ 
+        participantId,
+        language: language || 'english',
+        testIndex: testIndex || 0
+      });
       
       // Determine the question index safely
       let questionIndex = 0;
@@ -65,6 +66,8 @@ exports.uploadRecording = async (req, res) => {
       if (!assessment) {
         assessment = new Assessment({
           participantId,
+          language: language || 'english',
+          testIndex: testIndex || 0,
           status: 'in_progress',
           startedAt: new Date(),
           lastQuestionIndex: questionIndex
@@ -88,7 +91,9 @@ exports.uploadRecording = async (req, res) => {
       success: true,
       recording: {
         id: recording._id,
-        audioUrl: recording.audioUrl
+        audioUrl: recording.audioUrl,
+        language: recording.language,
+        testIndex: recording.testIndex
       }
     });
   } catch (error) {
@@ -97,80 +102,24 @@ exports.uploadRecording = async (req, res) => {
   }
 };
 
-// Get recordings for a participant
-exports.getRecordingsByParticipant = async (req, res) => {
-    try {
-      const { participantId } = req.params;
-      
-      const recordings = await Recording.find({ participantId })
-        .populate('questionId', 'questionNumber text')
-        .sort('createdAt');
-      
-      res.json(recordings);
-    } catch (error) {
-      console.error('Error fetching recordings:', error);
-      res.status(500).json({ message: 'Server error' });
-    }
-  };
-  
-  // Get a specific recording
-  exports.getRecording = async (req, res) => {
-    try {
-      const recording = await Recording.findById(req.params.id)
-        .populate('questionId', 'questionNumber text audioPromptUrl');
-      
-      if (!recording) {
-        return res.status(404).json({ message: 'Recording not found' });
-      }
-      
-      res.json(recording);
-    } catch (error) {
-      console.error('Error fetching recording:', error);
-      res.status(500).json({ message: 'Server error' });
-    }
-  };
-  
-  // Delete a recording
-  exports.deleteRecording = async (req, res) => {
-    try {
-      const recording = await Recording.findById(req.params.id);
-      
-      if (!recording) {
-        return res.status(404).json({ message: 'Recording not found' });
-      }
-      
-      // TODO: Delete file from cloud storage
-      
-      await recording.remove();
-      res.json({ message: 'Recording deleted successfully' });
-    } catch (error) {
-      console.error('Error deleting recording:', error);
-      res.status(500).json({ message: 'Server error' });
-    }
-  };
-  
-  // Get assessment statistics
-  exports.getAssessmentStats = async (req, res) => {
-    try {
-      const { participantId } = req.params;
-      
-      const totalRecordings = await Recording.countDocuments({ participantId });
-      const totalQuestions = await Question.countDocuments();
-      const completionPercentage = Math.round((totalRecordings / totalQuestions) * 100);
-      
-      const assessment = await Assessment.findOne({ participantId });
-      
-      res.json({
-        totalRecordings,
-        totalQuestions,
-        completionPercentage,
-        status: assessment ? assessment.status : 'not_started',
-        startedAt: assessment ? assessment.startedAt : null,
-        completedAt: assessment ? assessment.completedAt : null,
-        lastQuestionIndex: assessment ? assessment.lastQuestionIndex : 0
-      });
-    } catch (error) {
-      console.error('Error fetching assessment stats:', error);
-      res.status(500).json({ message: 'Server error' });
-    }
-  };
+// Get recordings for a participant with specific language and test index
+exports.getRecordingsByParticipantAndLanguage = async (req, res) => {
+  try {
+    const { participantId } = req.params;
+    const language = req.query.language || 'english';
+    const testIndex = parseInt(req.query.testIndex || '0');
+    
+    const recordings = await Recording.find({ 
+      participantId,
+      language,
+      testIndex
+    })
+      .populate('questionId', 'questionNumber text')
+      .sort('createdAt');
+    
+    res.json(recordings);
+  } catch (error) {
+    console.error('Error fetching recordings:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};

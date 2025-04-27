@@ -1,3 +1,4 @@
+// models/Recording.js - Updated schema
 const mongoose = require('mongoose');
 
 const RecordingSchema = new mongoose.Schema({
@@ -10,6 +11,15 @@ const RecordingSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Question',
     required: true
+  },
+  language: {
+    type: String,
+    required: true,
+    default: 'english'
+  },
+  testIndex: {
+    type: Number,
+    default: 0
   },
   audioUrl: {
     type: String,
