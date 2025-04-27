@@ -14,9 +14,6 @@ const participantRoutes = require('./routes/participantRoutes');
 // Initialize express app
 const app = express();
 
-// Connect to database
-connectDB();
-
 // Middleware
 app.use(cors());
 app.use(bodyParser.json());
@@ -38,18 +35,30 @@ app.get('/', (req, res) => {
 app.use((err, req, res, next) => {
   console.error(err.stack);
   
-  if (err instanceof multer.MulterError) {
-    if (err.code === 'LIMIT_FILE_SIZE') {
-      return res.status(400).json({ message: 'File is too large. Maximum size is 10MB.' });
-    }
+  if (err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(400).json({ message: 'File is too large. Maximum size is 10MB.' });
   }
   
   res.status(500).json({ message: err.message || 'Something went wrong on the server' });
 });
 
-// Set port and start server
+// Set port
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+// Connect to the database and then start the server
+const startServer = async () => {
+  try {
+    // Connect to MongoDB
+    await connectDB();
+    
+    // Start the server
+    app.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+    });
+  } catch (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  }
+};
+
+startServer();

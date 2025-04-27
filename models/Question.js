@@ -1,35 +1,6 @@
 // models/Question.js
 const mongoose = require('mongoose');
 
-// First, check if there's an existing model and try to delete any problematic indices
-const checkAndFixCollection = async () => {
-  try {
-    // Check if the collection exists
-    const collections = await mongoose.connection.db.listCollections({ name: 'questions' }).toArray();
-    
-    if (collections.length > 0) {
-      // Get all indices
-      const indices = await mongoose.connection.db.collection('questions').indexes();
-      
-      // Check for questionNumber index
-      const questionNumberIndex = indices.find(idx => 
-        idx.key && idx.key.questionNumber && idx.unique
-      );
-      
-      if (questionNumberIndex) {
-        // Drop the problematic index
-        await mongoose.connection.db.collection('questions').dropIndex(questionNumberIndex.name);
-        console.log('Dropped questionNumber index from questions collection');
-      }
-    }
-  } catch (error) {
-    console.error('Error checking/fixing collection:', error);
-  }
-};
-
-// Call this function when the model is required
-checkAndFixCollection().catch(err => console.error('Error initializing Question model:', err));
-
 // Define the schema without a unique constraint on questionNumber
 const QuestionSchema = new mongoose.Schema({
   // Sequence ID for ordering questions in the assessment flow
@@ -99,8 +70,7 @@ QuestionSchema.pre('save', function(next) {
   next();
 });
 
-// IMPORTANT: Do NOT create any unique indices here
-// Instead, create a compound index that's non-unique
+// Create a compound index that's non-unique
 QuestionSchema.index({ audioType: 1, displayNumber: 1 }); 
 
 // We explicitly avoid including the line:
