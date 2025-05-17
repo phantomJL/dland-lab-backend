@@ -1,4 +1,11 @@
-// controllers/recordingController.js - Updated uploadRecording function
+// controllers/recordingController.js
+const Recording = require('../models/Recording');
+const Question = require('../models/Question');
+const Participant = require('../models/Participant');
+const Assessment = require('../models/Assessment');
+const { uploadFile } = require('../utils/storageService');
+
+// Upload recording
 exports.uploadRecording = async (req, res) => {
   try {
     if (!req.file) {
@@ -34,7 +41,7 @@ exports.uploadRecording = async (req, res) => {
       participantId,
       questionId,
       language: language || 'english',
-      testIndex: testIndex || 0,
+      testIndex: parseInt(testIndex) || 0,
       audioUrl: fileData.url,
       audioStoragePath: fileData.path,
       durationMs: duration || 0
@@ -47,7 +54,7 @@ exports.uploadRecording = async (req, res) => {
       let assessment = await Assessment.findOne({ 
         participantId,
         language: language || 'english',
-        testIndex: testIndex || 0
+        testIndex: parseInt(testIndex) || 0
       });
       
       // Determine the question index safely
@@ -67,7 +74,7 @@ exports.uploadRecording = async (req, res) => {
         assessment = new Assessment({
           participantId,
           language: language || 'english',
-          testIndex: testIndex || 0,
+          testIndex: parseInt(testIndex) || 0,
           status: 'in_progress',
           startedAt: new Date(),
           lastQuestionIndex: questionIndex
@@ -102,24 +109,103 @@ exports.uploadRecording = async (req, res) => {
   }
 };
 
-// Get recordings for a participant with specific language and test index
-exports.getRecordingsByParticipantAndLanguage = async (req, res) => {
+// Get recordings for a participant
+exports.getRecordingsByParticipant = async (req, res) => {
   try {
     const { participantId } = req.params;
     const language = req.query.language || 'english';
     const testIndex = parseInt(req.query.testIndex || '0');
     
-    const recordings = await Recording.find({ 
-      participantId,
-      language,
-      testIndex
-    })
-      .populate('questionId', 'questionNumber text')
+    // If specific language and test index are provided, filter by them
+    const filter = { participantId };
+    if (language) filter.language = language;
+    if (!isNaN(testIndex)) filter.testIndex = testIndex;
+    
+    const recordings = await Recording.find(filter)
+      .populate('questionId', 'questionNumber text audioType displayNumber')
       .sort('createdAt');
     
     res.json(recordings);
   } catch (error) {
     console.error('Error fetching recordings:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// Get a specific recording
+exports.getRecording = async (req, res) => {
+  try {
+    const recording = await Recording.findById(req.params.id)
+      .populate('questionId', 'questionNumber text audioPromptUrl');
+    
+    if (!recording) {
+      return res.status(404).json({ message: 'Recording not found' });
+    }
+    
+    res.json(recording);
+  } catch (error) {
+    console.error('Error fetching recording:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// Delete a recording
+exports.deleteRecording = async (req, res) => {
+  try {
+    const recording = await Recording.findById(req.params.id);
+    
+    if (!recording) {
+      return res.status(404).json({ message: 'Recording not found' });
+    }
+    
+    // TODO: Delete file from cloud storage
+    
+    await recording.remove();
+    res.json({ message: 'Recording deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting recording:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// Get assessment statistics
+exports.getAssessmentStats = async (req, res) => {
+  try {
+    const { participantId } = req.params;
+    const language = req.query.language || 'english';
+    const testIndex = parseInt(req.query.testIndex || '0');
+    
+    const filter = { 
+      participantId,
+      language,
+      testIndex
+    };
+    
+    const totalRecordings = await Recording.countDocuments(filter);
+    const totalQuestions = await Question.countDocuments({
+      language: language
+    });
+    const completionPercentage = Math.round((totalRecordings / totalQuestions) * 100);
+    
+    const assessment = await Assessment.findOne({
+      participantId,
+      language,
+      testIndex
+    });
+    
+    res.json({
+      totalRecordings,
+      totalQuestions,
+      completionPercentage,
+      status: assessment ? assessment.status : 'not_started',
+      startedAt: assessment ? assessment.startedAt : null,
+      completedAt: assessment ? assessment.completedAt : null,
+      lastQuestionIndex: assessment ? assessment.lastQuestionIndex : 0,
+      language,
+      testIndex
+    });
+  } catch (error) {
+    console.error('Error fetching assessment stats:', error);
     res.status(500).json({ message: 'Server error' });
   }
 };
